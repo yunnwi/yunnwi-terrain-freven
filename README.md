@@ -1,5 +1,7 @@
 # Yunnwi Terrain Mod for Freven rc7
 
+MIT licensed example runtime-loaded Wasm terrain worldgen mod for Freven.
+
 Example runtime-loaded Wasm worldgen mod for Freven DevKit `v0.1.0-rc7`.
 
 It demonstrates:
