@@ -1,0 +1,19 @@
+schema = 2
+id = "yunnwi.terrain"
+version = "0.1.0"
+artifact = "wasm_module"
+execution = "wasm_guest"
+surfaces = "both"
+trust = "sandboxed"
+policy = "safe_guest"
+entry = "yunnwi_terrain_mod.wasm"
+
+[capabilities]
+max_call_millis = 25
+max_linear_memory_bytes = 4194304
+
+# Worldgen providers can use a separate workload budget in Freven rc7.
+worldgen_max_linear_memory_bytes = 67108864
+worldgen_max_call_millis = 250
+worldgen_max_result_bytes = 4194304
+allow_unstable = false

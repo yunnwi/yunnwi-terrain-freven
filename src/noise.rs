@@ -1,0 +1,146 @@
+pub const AIR: u8 = 0;
+
+pub const DIM: usize = 32;
+pub const IDIM: i32 = DIM as i32;
+pub const WORLD_H: i32 = 96;
+
+pub fn hash2(x: i32, z: i32, seed: u64) -> u32 {
+    let mut h = seed
+        .wrapping_add(x as u64 * 2654435761)
+        .wrapping_add(z as u64 * 2246822519);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51afd7ed558ccd);
+    h ^= h >> 33;
+    h as u32
+}
+
+pub fn hash3(x: i32, y: i32, z: i32, seed: u64) -> u32 {
+    let mut h = seed
+        .wrapping_add(x as u64 * 2654435761)
+        .wrapping_add(y as u64 * 1234567891)
+        .wrapping_add(z as u64 * 2246822519);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51afd7ed558ccd);
+    h ^= h >> 33;
+    h as u32
+}
+
+pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + t * (b - a)
+}
+pub fn fade(t: f32) -> f32 {
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
+pub fn clamp01(v: f32) -> f32 {
+    v.max(0.0).min(1.0)
+}
+
+fn grad2(h: u32, x: f32, z: f32) -> f32 {
+    match h & 3 {
+        0 => x + z,
+        1 => -x + z,
+        2 => x - z,
+        _ => -x - z,
+    }
+}
+
+fn grad3(h: u32, x: f32, y: f32, z: f32) -> f32 {
+    match h & 7 {
+        0 => x + y,
+        1 => -x + y,
+        2 => x - y,
+        3 => -x - y,
+        4 => x + z,
+        5 => -x + z,
+        6 => y + z,
+        _ => -y - z,
+    }
+}
+
+pub fn perlin2(wx: f32, wz: f32, seed: u64) -> f32 {
+    let xi = wx.floor() as i32;
+    let zi = wz.floor() as i32;
+    let xf = wx - wx.floor();
+    let zf = wz - wz.floor();
+    let u = fade(xf);
+    let v = fade(zf);
+    let aa = hash2(xi, zi, seed);
+    let ba = hash2(xi + 1, zi, seed);
+    let ab = hash2(xi, zi + 1, seed);
+    let bb = hash2(xi + 1, zi + 1, seed);
+    let x1 = lerp(grad2(aa, xf, zf), grad2(ba, xf - 1.0, zf), u);
+    let x2 = lerp(grad2(ab, xf, zf - 1.0), grad2(bb, xf - 1.0, zf - 1.0), u);
+    lerp(x1, x2, v)
+}
+
+pub fn perlin3(wx: f32, wy: f32, wz: f32, seed: u64) -> f32 {
+    let xi = wx.floor() as i32;
+    let yi = wy.floor() as i32;
+    let zi = wz.floor() as i32;
+    let xf = wx - wx.floor();
+    let yf = wy - wy.floor();
+    let zf = wz - wz.floor();
+    let u = fade(xf);
+    let v = fade(yf);
+    let w = fade(zf);
+    macro_rules! h3 {
+        ($a:expr,$b:expr,$c:expr) => {
+            hash3($a, $b, $c, seed)
+        };
+    }
+    let aaa = h3!(xi, yi, zi);
+    let baa = h3!(xi + 1, yi, zi);
+    let aba = h3!(xi, yi + 1, zi);
+    let bba = h3!(xi + 1, yi + 1, zi);
+    let aab = h3!(xi, yi, zi + 1);
+    let bab = h3!(xi + 1, yi, zi + 1);
+    let abb = h3!(xi, yi + 1, zi + 1);
+    let bbb = h3!(xi + 1, yi + 1, zi + 1);
+    let x1 = lerp(grad3(aaa, xf, yf, zf), grad3(baa, xf - 1.0, yf, zf), u);
+    let x2 = lerp(
+        grad3(aba, xf, yf - 1.0, zf),
+        grad3(bba, xf - 1.0, yf - 1.0, zf),
+        u,
+    );
+    let x3 = lerp(
+        grad3(aab, xf, yf, zf - 1.0),
+        grad3(bab, xf - 1.0, yf, zf - 1.0),
+        u,
+    );
+    let x4 = lerp(
+        grad3(abb, xf, yf - 1.0, zf - 1.0),
+        grad3(bbb, xf - 1.0, yf - 1.0, zf - 1.0),
+        u,
+    );
+    lerp(lerp(x1, x2, v), lerp(x3, x4, v), w)
+}
+
+pub fn fbm(wx: f32, wz: f32, seed: u64, octaves: u32, lac: f32, gain: f32) -> f32 {
+    let mut val = 0.0f32;
+    let mut amp = 1.0f32;
+    let mut freq = 1.0f32;
+    let mut max = 0.0f32;
+    for i in 0..octaves {
+        val += perlin2(wx * freq, wz * freq, seed.wrapping_add(i as u64 * 1337)) * amp;
+        max += amp;
+        amp *= gain;
+        freq *= lac;
+    }
+    val / max
+}
+
+pub fn ridged(wx: f32, wz: f32, seed: u64, octaves: u32) -> f32 {
+    let mut val = 0.0f32;
+    let mut amp = 1.0f32;
+    let mut freq = 1.0f32;
+    let mut max = 0.0f32;
+    for i in 0..octaves {
+        let n = perlin2(wx * freq, wz * freq, seed.wrapping_add(i as u64 * 1337));
+        let r = 1.0 - n.abs();
+        val += r * r * amp;
+        max += amp;
+        amp *= 0.5;
+        freq *= 2.1;
+    }
+    val / max
+}

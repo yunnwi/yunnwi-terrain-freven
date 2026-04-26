@@ -1,0 +1,17 @@
+schema = 1
+id = "yunnwi.terrain.test"
+version = "0.1.0"
+title = "Yunnwi Terrain Test"
+base = "freven.vanilla"
+
+[[layers]]
+id = "yunnwi.terrain.layer"
+version = "0.1.0"
+title = "Yunnwi Terrain Override"
+
+[layers.defaults]
+worldgen = "yunnwi.terrain:terrain"
+
+[[layers.mods]]
+id = "yunnwi.terrain"
+version = "^0.1"

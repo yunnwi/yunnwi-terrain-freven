@@ -1,0 +1,9 @@
+/target/
+.DS_Store
+.idea/
+*.iml
+*.log
+
+# Local Freven devkit copies / test instances
+/freven-devkit-*/
+/instances/

@@ -1,0 +1,18 @@
+[package]
+name = "yunnwi_terrain_mod"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "yunnwi_terrain_mod"
+crate-type = ["cdylib"]
+
+[dependencies]
+freven_world_guest_sdk = { git = "https://github.com/frevenengine/freven-sdk", tag = "v0.1.2-rc4", package = "freven_world_guest_sdk" }
+freven_volumetric_sdk_types = { git = "https://github.com/frevenengine/freven-sdk", tag = "v0.1.2-rc4", package = "freven_volumetric_sdk_types" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
