@@ -1,7 +1,12 @@
+//! Simple cave masks used during terrain filling.
+//!
+//! These functions return `true` when a terrain block should be skipped,
+//! leaving air in the generated column buffer.
+
 use crate::noise::*;
 
 pub fn is_cave(wx: i32, wy: i32, wz: i32, seed: u64, surface_h: i32) -> bool {
-    // минимум 6 блоков под поверхностью
+    // Keep caves below the surface so the terrain does not become too fragile.
     if wy <= 1 || wy > 28 {
         return false;
     }
@@ -27,7 +32,7 @@ pub fn is_cave(wx: i32, wy: i32, wz: i32, seed: u64, surface_h: i32) -> bool {
 }
 
 pub fn is_cheese_cave(wx: i32, wy: i32, wz: i32, seed: u64, surface_h: i32) -> bool {
-    // минимум 8 блоков под поверхностью
+    // Larger pockets use a stricter depth limit.
     if wy <= 2 || wy > 20 {
         return false;
     }
@@ -45,7 +50,7 @@ pub fn is_cheese_cave(wx: i32, wy: i32, wz: i32, seed: u64, surface_h: i32) -> b
 }
 
 pub fn is_cave_hall(wx: i32, wy: i32, wz: i32, seed: u64, surface_h: i32) -> bool {
-    // минимум 10 блоков под поверхностью
+    // Large halls are rare and deeper than the smaller cave masks.
     if wy <= 2 || wy > 16 {
         return false;
     }

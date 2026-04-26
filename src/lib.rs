@@ -1,3 +1,8 @@
+//! Freven rc7 runtime-loaded Wasm terrain worldgen example.
+//!
+//! This crate demonstrates the current high-level world guest SDK path:
+//! block registration, a worldgen provider, lifecycle hooks, and Wasm exports.
+
 mod biomes;
 mod blocks;
 mod caves;
@@ -12,12 +17,12 @@ fn make_module() -> GuestModule {
     blocks::register_blocks(GuestModule::new(blocks::MOD_ID))
         .register_worldgen_handler(blocks::TERRAIN_WORLDGEN_KEY, generate)
         .on_start_server(|_| {
-            log_info!("yunnwi terrain mod loaded (server)!");
+            log_info!("yunnwi terrain mod loaded on server");
             LifecycleResponse::default().finish()
         })
         .on_tick_server(|_| LifecycleResponse::default().finish())
         .on_start_client(|_| {
-            log_info!("yunnwi terrain mod loaded (client)!");
+            log_info!("yunnwi terrain mod loaded on client");
             LifecycleResponse::default().finish()
         })
         .on_tick_client(|_| LifecycleResponse::default().finish())

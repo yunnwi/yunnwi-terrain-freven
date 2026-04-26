@@ -1,3 +1,8 @@
+//! Small deterministic structures placed after base terrain generation.
+//!
+//! Structures write into the local column buffer before it is converted into
+//! Freven `WorldTerrainWrite`s.
+
 use crate::noise::*;
 use crate::world::{get_world, set_world};
 

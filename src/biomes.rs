@@ -1,3 +1,8 @@
+//! Biome blending and terrain height functions.
+//!
+//! The terrain is intentionally deterministic: the same seed and world-space
+//! coordinates always produce the same biome weights and height.
+
 use crate::noise::*;
 
 pub struct BiomeWeights {
@@ -10,10 +15,12 @@ pub struct BiomeWeights {
 }
 
 pub fn biome_weights(wx: f32, wz: f32, seed: u64) -> BiomeWeights {
-    // у спавна принудительно plains
+    // Keep the area near the origin gentle, but do not flatten terrain height.
+    // Player placement is handled separately through the rc7 spawn hint.
     let spawn_dist = (wx * wx + wz * wz).sqrt();
     let spawn_blend = clamp01((spawn_dist - 80.0) / 120.0);
 
+    // Low-frequency fields drive broad biome selection.
     let cont = clamp01(
         fbm(
             wx / 700.0,
@@ -48,6 +55,8 @@ pub fn biome_weights(wx: f32, wz: f32, seed: u64) -> BiomeWeights {
             + 0.5,
     );
 
+    // Convert the climate fields into soft biome weights. These are normalized
+    // below so height functions can be blended smoothly instead of hard-cut.
     let high_mountains = clamp01((cont - 0.45) * 4.5) * clamp01((1.0 - erosion) * 3.0);
     let mountains =
         clamp01((cont - 0.28) * 3.5) * (1.0 - high_mountains) * clamp01((1.0 - erosion) * 2.5);
@@ -81,6 +90,8 @@ pub fn biome_weights(wx: f32, wz: f32, seed: u64) -> BiomeWeights {
 pub fn terrain_height(wx: f32, wz: f32, seed: u64) -> f32 {
     let bw = biome_weights(wx, wz, seed);
 
+    // Each biome has its own height function. The final terrain height is a
+    // weighted blend of these functions.
     let smooth_h = {
         let n = fbm(wx / 200.0, wz / 200.0, seed, 2, 2.0, 0.3);
         6.0 + (n * 0.5 + 0.5) * 2.0

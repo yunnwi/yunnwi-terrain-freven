@@ -1,3 +1,9 @@
+//! Freven worldgen provider implementation.
+//!
+//! The provider builds a local 32×96×32 block buffer, decorates it with
+//! structures, compresses the result into terrain writes, and optionally emits
+//! an initial spawn hint for world bootstrap.
+
 use crate::biomes::{biome_weights, terrain_height};
 use crate::blocks::*;
 use crate::caves::{is_cave, is_cave_hall, is_cheese_cave};
@@ -9,10 +15,12 @@ use freven_world_guest_sdk::{
     WorldGenContext, WorldGenOutput, WorldTerrainWrite,
 };
 
+/// Converts local `(x, y, z)` coordinates inside one 32³ section into a flat index.
 pub fn sec_idx(x: usize, y: usize, z: usize) -> usize {
     x + DIM * (y + DIM * z)
 }
 
+/// Writes a runtime block ID into the local three-section column buffer.
 pub fn set_world(s0: &mut [u32], s1: &mut [u32], s2: &mut [u32], x: i32, y: i32, z: i32, id: u32) {
     if x < 0 || z < 0 || x >= IDIM || z >= IDIM || y < 0 || y >= WORLD_H {
         return;
@@ -27,6 +35,7 @@ pub fn set_world(s0: &mut [u32], s1: &mut [u32], s2: &mut [u32], x: i32, y: i32,
     buf[sec_idx(x as usize, ly, z as usize)] = id;
 }
 
+/// Reads a runtime block ID from the local buffer. Out-of-bounds reads are air.
 pub fn get_world(s0: &[u32], s1: &[u32], s2: &[u32], x: i32, y: i32, z: i32) -> u32 {
     if x < 0 || z < 0 || x >= IDIM || z >= IDIM || y < 0 || y >= WORLD_H {
         return AIR as u32;
@@ -41,6 +50,7 @@ pub fn get_world(s0: &[u32], s1: &[u32], s2: &[u32], x: i32, y: i32, z: i32) -> 
     buf[sec_idx(x as usize, ly, z as usize)]
 }
 
+/// Runtime block IDs resolved from Freven's registry for this worldgen call.
 #[derive(Clone, Copy)]
 pub struct GenBlockIds {
     pub stone: u32,
@@ -53,6 +63,8 @@ pub struct GenBlockIds {
 
 pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
     let seed = ctx.init().seed;
+    // Resolve numeric runtime IDs from stable string keys. Mods should not
+    // assume that registered blocks always receive the same numeric IDs.
     let ids = GenBlockIds {
         stone: ctx
             .init()
@@ -123,9 +135,9 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
                 } else if y + 3 < h {
                     ids.dirt
                 } else if is_very_high {
-                    ids.stone // снежные шапки
+                    ids.stone // bare high-altitude peaks
                 } else if is_mountain && is_high {
-                    ids.stone // каменные пики
+                    ids.stone // rocky mountain slopes
                 } else {
                     ids.grass
                 };
@@ -137,7 +149,7 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
     let ch = hash2(cx, cz, seed);
     let center_bw = biome_weights((bx + IDIM / 2) as f32, (bz + IDIM / 2) as f32, seed);
 
-    // дома — редко (1/12 чанков), не в горах
+    // Houses are rare and avoided in mountain-heavy chunks.
     let house_pos = if ch % 12 == 0 && center_bw.mountains + center_bw.high_mountains < 0.25 {
         let hh = hash2(cx, cz, seed.wrapping_add(42));
         let hx = (hh % 14) as i32 + 5;
@@ -153,7 +165,7 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
         None
     };
 
-    // деревья — не спавним рядом с домом
+    // Tree count is biome-dependent. Keep trees away from houses.
     let tree_density = center_bw.forest * 9.0
         + center_bw.plains * 2.0
         + center_bw.rolling_hills * 3.0
@@ -173,7 +185,7 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
             let ddz = tz - hz;
             if ddx * ddx + ddz * ddz < 81 {
                 continue;
-            } // 9 блоков зазор
+            } // 9-block clearance around houses
         }
 
         let ground = heights[tx as usize + DIM * tz as usize];
@@ -219,6 +231,9 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
         }
     }
 
+    // rc7 supports an advisory initial spawn hint. This replaces older terrain
+    // shaping workarounds near (0, 0): the worldgen provider can suggest a
+    // feet position and the host may validate or adjust it before persisting it.
     let bootstrap = if cx == 0 && cz == 0 {
         let spawn_x = 16usize;
         let spawn_z = 16usize;
