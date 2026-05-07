@@ -11,6 +11,9 @@ pub const MOD_ID: &str = "yunnwi.terrain";
 pub const COBBLESTONE_KEY: &str = "yunnwi.terrain:cobblestone";
 pub const LOG_KEY: &str = "yunnwi.terrain:log";
 pub const LEAVES_KEY: &str = "yunnwi.terrain:leaves";
+pub const SAND_KEY: &str = "yunnwi.terrain:sand";
+pub const GRAVEL_KEY: &str = "yunnwi.terrain:gravel";
+pub const SNOW_KEY: &str = "yunnwi.terrain:snow";
 
 pub const TERRAIN_WORLDGEN_KEY: &str = "yunnwi.terrain:terrain";
 
@@ -35,5 +38,17 @@ pub fn register_blocks(module: GuestModule) -> GuestModule {
         .register_block(
             LEAVES_KEY,
             BlockDescriptor::new(true, true, RenderLayer::Opaque, 0x7BC96FFF, 6),
+        )
+        .register_block(
+            SAND_KEY,
+            BlockDescriptor::new(true, true, RenderLayer::Opaque, 0xE6D37AFF, 7),
+        )
+        .register_block(
+            GRAVEL_KEY,
+            BlockDescriptor::new(true, true, RenderLayer::Opaque, 0x9A958AFF, 8),
+        )
+        .register_block(
+            SNOW_KEY,
+            BlockDescriptor::new(true, true, RenderLayer::Opaque, 0xFFFFFFFF, 9),
         )
 }

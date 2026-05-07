@@ -58,6 +58,9 @@ pub struct GenBlockIds {
     pub cobblestone: u32,
     pub log: u32,
     pub leaves: u32,
+    pub sand: u32,
+    pub gravel: u32,
+    pub snow: u32,
 }
 
 pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
@@ -95,6 +98,21 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
             .block_id_by_key(LEAVES_KEY)
             .map(|id| id.0)
             .unwrap_or(6),
+        sand: ctx
+            .init()
+            .block_id_by_key(SAND_KEY)
+            .map(|id| id.0)
+            .unwrap_or(7),
+        gravel: ctx
+            .init()
+            .block_id_by_key(GRAVEL_KEY)
+            .map(|id| id.0)
+            .unwrap_or(8),
+        snow: ctx
+            .init()
+            .block_id_by_key(SNOW_KEY)
+            .map(|id| id.0)
+            .unwrap_or(9),
     };
     let cx = ctx.request().cx();
     let cz = ctx.request().cz();
