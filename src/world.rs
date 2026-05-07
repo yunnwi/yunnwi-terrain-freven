@@ -170,19 +170,41 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
     let ch = hash2(cx, cz, seed);
     let center_bw = biome_weights((bx + IDIM / 2) as f32, (bz + IDIM / 2) as f32, seed);
 
-    // Settlements should be uncommon landmarks, not frequent chunk clutter.
+    // Structures V2.
     //
-    // Vintage Story / Minecraft style generation works better when structures
-    // are sparse and memorable instead of evenly distributed.
-    let house_pos = if ch % 85 == 0
-        && center_bw.mountains + center_bw.high_mountains < 0.18
-        && center_bw.plains + center_bw.forest > 0.55
+    // Small houses are rare landmarks. They require a stable lowland/forest-edge
+    // footprint instead of appearing as uniform chunk clutter.
+    let house_pos = if ch % 180 == 0
+        && center_bw.mountains + center_bw.high_mountains < 0.10
+        && center_bw.plains + center_bw.forest + center_bw.smooth_plains > 0.62
     {
         let hh = hash2(cx, cz, seed.wrapping_add(42));
-        let hx = (hh % 14) as i32 + 5;
-        let hz = ((hh >> 8) % 14) as i32 + 5;
+        let hx = (hh % 12) as i32 + 6;
+        let hz = ((hh >> 8) % 12) as i32 + 6;
         let ground = heights[hx as usize + DIM * hz as usize];
-        if ground >= 1 && ground + 7 < WORLD_H {
+
+        let mut max_delta = 0i32;
+        for dz in -4..=4 {
+            for dx in -4..=4 {
+                let nx = (hx + dx).clamp(0, IDIM - 1) as usize;
+                let nz = (hz + dz).clamp(0, IDIM - 1) as usize;
+                let nh = heights[nx + DIM * nz];
+                max_delta = max_delta.max((nh - ground).abs());
+            }
+        }
+
+        let wx = bx + hx;
+        let wz = bz + hz;
+        let climate = sample_climate(wx as f32, wz as f32, seed);
+        let slope = slope_at(wx, wz, |sx, sz| {
+            terrain_height(sx as f32, sz as f32, seed) as i32
+        });
+
+        let good_footprint = max_delta <= 2 && slope <= 2.0;
+        let good_climate = climate.temperature > 0.24 && climate.humidity > 0.20;
+        let good_height = (6..40).contains(&ground);
+
+        if good_footprint && good_climate && good_height && ground + 7 < WORLD_H {
             place_house(&mut sec0, &mut sec1, &mut sec2, ids, hx, ground + 1, hz, hh);
             Some((hx, hz))
         } else {
