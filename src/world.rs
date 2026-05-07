@@ -9,11 +9,8 @@ use crate::blocks::*;
 use crate::caves::{is_cave, is_cave_hall, is_cheese_cave};
 use crate::noise::*;
 use crate::structures::{place_house, place_tree};
-use freven_volumetric_sdk_types::WorldCellPos;
-use freven_world_guest_sdk::{
-    BlockRuntimeId, InitialWorldSpawnHint, WorldGenBootstrapOutput, WorldGenCallResult,
-    WorldGenContext, WorldGenOutput, WorldTerrainWrite,
-};
+use freven_volumetric_api::{ColumnLocalCellPos, WorldGenColumnBuilder};
+use freven_world_guest_sdk::{BlockRuntimeId, WorldGenCallResult, WorldGenContext};
 
 /// Converts local `(x, y, z)` coordinates inside one 32³ section into a flat index.
 pub fn sec_idx(x: usize, y: usize, z: usize) -> usize {
@@ -194,45 +191,63 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
         }
     }
 
-    let mut writes = Vec::new();
+    let mut out = WorldGenColumnBuilder::for_request(ctx.request());
 
-    // Debug mode: emit one SetBlock per non-air block.
-    // This is less efficient than FillBox runs, but helps isolate whether
-    // client prediction issues are related to FillBox application.
-    for y in 0..WORLD_H {
-        for z in 0..DIM {
-            for x in 0..DIM {
-                let id = get_world(&sec0, &sec1, &sec2, x as i32, y, z as i32);
-                if id == AIR as u32 {
-                    continue;
+    // rc8 builder mode: emit compact vertical runs using column-local X/Z.
+    // The builder validates local bounds and converts local coordinates to
+    // absolute world-cell positions for the requested column.
+    for z in 0..DIM {
+        for x in 0..DIM {
+            let mut y = 0;
+
+            while y < WORLD_H {
+                while y < WORLD_H
+                    && get_world(&sec0, &sec1, &sec2, x as i32, y, z as i32) == AIR as u32
+                {
+                    y += 1;
                 }
 
-                writes.push(WorldTerrainWrite::SetBlock {
-                    pos: WorldCellPos::new(bx + x as i32, y, bz + z as i32),
-                    block_id: BlockRuntimeId(id),
-                });
+                if y >= WORLD_H {
+                    break;
+                }
+
+                let run_start = y;
+                let id = get_world(&sec0, &sec1, &sec2, x as i32, y, z as i32);
+
+                y += 1;
+                while y < WORLD_H && get_world(&sec0, &sec1, &sec2, x as i32, y, z as i32) == id {
+                    y += 1;
+                }
+
+                let local_x = u8::try_from(x).expect("local x fits u8");
+                let local_z = u8::try_from(z).expect("local z fits u8");
+
+                if y - run_start == 1 {
+                    out.set_block_local(
+                        ColumnLocalCellPos::new(local_x, run_start, local_z),
+                        BlockRuntimeId(id),
+                    )
+                    .expect("valid column-local terrain cell");
+                } else {
+                    out.fill_vertical_run_local(local_x, local_z, run_start..y, BlockRuntimeId(id))
+                        .expect("valid column-local terrain run");
+                }
             }
         }
     }
 
-    // rc7 supports an advisory initial spawn hint. This replaces older terrain
+    // rc8 supports an advisory initial spawn hint. This replaces older terrain
     // shaping workarounds near (0, 0): the worldgen provider can suggest a
     // feet position and the host may validate or adjust it before persisting it.
-    let bootstrap = if cx == 0 && cz == 0 {
+    if cx == 0 && cz == 0 {
         let spawn_x = 16usize;
         let spawn_z = 16usize;
         let spawn_y = heights[spawn_x + DIM * spawn_z] as f32 + 2.0;
 
-        WorldGenBootstrapOutput {
-            initial_world_spawn_hint: Some(InitialWorldSpawnHint {
-                feet_position: [spawn_x as f32 + 0.5, spawn_y, spawn_z as f32 + 0.5],
-            }),
-        }
-    } else {
-        WorldGenBootstrapOutput::default()
-    };
+        out.set_initial_world_spawn_hint([spawn_x as f32 + 0.5, spawn_y, spawn_z as f32 + 0.5]);
+    }
 
     WorldGenCallResult {
-        output: WorldGenOutput { writes, bootstrap },
+        output: out.finish(),
     }
 }

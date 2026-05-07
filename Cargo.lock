@@ -293,6 +293,7 @@ checksum = "2ee1708bef14716a11bae175f579062d4554d95be2c6829f518df847b7b3fdd0"
 name = "yunnwi_terrain_mod"
 version = "0.1.0"
 dependencies = [
+ "freven_volumetric_api",
  "freven_volumetric_sdk_types",
  "freven_world_guest_sdk",
 ]
