@@ -7,6 +7,7 @@
 use crate::biomes::{biome_weights, terrain_height};
 use crate::blocks::*;
 use crate::caves::{is_cave, is_cave_hall, is_cheese_cave};
+use crate::climate::sample_climate;
 use crate::geology::{SurfaceContext, slope_at, terrain_material};
 use crate::noise::*;
 use crate::spawn::find_world_spawn;
@@ -191,28 +192,61 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
         None
     };
 
-    // Forest ecology pass.
+    // Vegetation V2.
     //
-    // Trees form climate-driven clusters and avoid steep/alpine terrain.
-    // This is intentionally not uniform random scatter.
+    // Tree placement is climate-, altitude-, slope-, and cluster-aware.
+    // This avoids uniform scatter and creates clearer forest regions, dry open
+    // areas, alpine tree lines, and natural clearings.
+    let center_climate = sample_climate((bx + IDIM / 2) as f32, (bz + IDIM / 2) as f32, seed);
+
     let forest_noise = fbm(
-        (bx as f32) / 180.0,
-        (bz as f32) / 180.0,
+        (bx as f32) / 220.0,
+        (bz as f32) / 220.0,
         seed.wrapping_add(91_337),
+        4,
+        2.0,
+        0.5,
+    ) * 0.5
+        + 0.5;
+
+    let clearing_noise = fbm(
+        (bx as f32) / 90.0,
+        (bz as f32) / 90.0,
+        seed.wrapping_add(91_338),
         3,
         2.0,
         0.5,
     ) * 0.5
         + 0.5;
 
-    let forest_cluster = clamp01((forest_noise - 0.42) * 2.0);
+    let forest_cluster = clamp01((forest_noise - 0.36) * 2.15);
+    let clearing = clamp01((clearing_noise - 0.58) * 2.0);
 
-    let tree_density = center_bw.forest * 16.0 * forest_cluster
-        + center_bw.plains * 1.5
-        + center_bw.rolling_hills * 2.5
-        + center_bw.smooth_plains * 0.3;
+    let climate_tree_factor = clamp01(
+        center_climate.humidity * 0.75 + center_climate.forestation * 0.85
+            - (center_climate.temperature - 0.82).max(0.0) * 0.9,
+    );
 
-    let count = (tree_density as usize).min(18);
+    let alpine_penalty = if center_bw.high_mountains > 0.15 {
+        0.55
+    } else {
+        1.0
+    };
+    let dry_penalty = if center_climate.humidity < 0.24 {
+        0.25
+    } else {
+        1.0
+    };
+
+    let tree_density = (center_bw.forest * 18.0 * forest_cluster * climate_tree_factor
+        + center_bw.rolling_hills * 3.2 * climate_tree_factor
+        + center_bw.plains * 1.2 * climate_tree_factor
+        + center_bw.smooth_plains * 0.25 * climate_tree_factor)
+        * alpine_penalty
+        * dry_penalty
+        * (1.0 - clearing * 0.65);
+
+    let count = (tree_density as usize).min(22);
 
     for i in 0..count {
         let th = hash2(
@@ -220,33 +254,47 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
             cz * 37 + i as i32,
             seed.wrapping_add(i as u64 * 100 + 1),
         );
+
         let tx = (th % 22) as i32 + 5;
         let tz = ((th >> 8) % 22) as i32 + 5;
 
         if let Some((hx, hz)) = house_pos {
             let ddx = tx - hx;
             let ddz = tz - hz;
-            if ddx * ddx + ddz * ddz < 81 {
+            if ddx * ddx + ddz * ddz < 100 {
                 continue;
             }
         }
 
+        let wx = bx + tx;
+        let wz = bz + tz;
         let ground = heights[tx as usize + DIM * tz as usize];
+        let local_climate = sample_climate(wx as f32, wz as f32, seed);
 
-        let mut max_delta = 0i32;
-        for dz in -1..=1 {
-            for dx in -1..=1 {
-                let nx = (tx + dx).clamp(0, IDIM - 1) as usize;
-                let nz = (tz + dz).clamp(0, IDIM - 1) as usize;
-                let nh = heights[nx + DIM * nz];
-                max_delta = max_delta.max((nh - ground).abs());
-            }
+        let slope = slope_at(wx, wz, |sx, sz| {
+            terrain_height(sx as f32, sz as f32, seed) as i32
+        });
+
+        let too_steep = slope > 3.0;
+        let too_high = ground > 54 || (ground > 38 && local_climate.temperature < 0.34);
+        let too_dry = local_climate.humidity < 0.18;
+        let too_hot_dry = local_climate.temperature > 0.82 && local_climate.humidity < 0.38;
+
+        let micro_clear = fbm(
+            wx as f32 / 42.0,
+            wz as f32 / 42.0,
+            seed.wrapping_add(91_339),
+            2,
+            2.0,
+            0.5,
+        ) * 0.5
+            + 0.5;
+
+        if too_steep || too_high || too_dry || too_hot_dry || micro_clear > 0.82 {
+            continue;
         }
 
-        let alpine = center_bw.high_mountains > 0.22 || ground > 52;
-
-        if max_delta <= 3 && !alpine && get_world(&sec0, &sec1, &sec2, tx, ground, tz) == ids.grass
-        {
+        if get_world(&sec0, &sec1, &sec2, tx, ground, tz) == ids.grass {
             place_tree(&mut sec0, &mut sec1, &mut sec2, ids, tx, ground + 1, tz, th);
         }
     }
