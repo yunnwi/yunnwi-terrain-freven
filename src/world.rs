@@ -196,37 +196,21 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
 
     let mut writes = Vec::new();
 
-    // Compress each vertical column into FillBox runs.
-    // This keeps the example simple while avoiding one SetBlock write per block.
-    for z in 0..DIM {
-        for x in 0..DIM {
-            let mut y = 0;
-            while y < WORLD_H {
+    // Debug mode: emit one SetBlock per non-air block.
+    // This is less efficient than FillBox runs, but helps isolate whether
+    // client prediction issues are related to FillBox application.
+    for y in 0..WORLD_H {
+        for z in 0..DIM {
+            for x in 0..DIM {
                 let id = get_world(&sec0, &sec1, &sec2, x as i32, y, z as i32);
                 if id == AIR as u32 {
-                    y += 1;
                     continue;
                 }
 
-                let start_y = y;
-                y += 1;
-                while y < WORLD_H && get_world(&sec0, &sec1, &sec2, x as i32, y, z as i32) == id {
-                    y += 1;
-                }
-
-                if y == start_y + 1 {
-                    writes.push(WorldTerrainWrite::SetBlock {
-                        pos: WorldCellPos::new(bx + x as i32, start_y, bz + z as i32),
-                        block_id: BlockRuntimeId(id),
-                    });
-                } else {
-                    writes.push(WorldTerrainWrite::FillBox {
-                        min: WorldCellPos::new(bx + x as i32, start_y, bz + z as i32),
-                        // FillBox uses half-open bounds: [min, max).
-                        max: WorldCellPos::new(bx + x as i32 + 1, y, bz + z as i32 + 1),
-                        block_id: BlockRuntimeId(id),
-                    });
-                }
+                writes.push(WorldTerrainWrite::SetBlock {
+                    pos: WorldCellPos::new(bx + x as i32, y, bz + z as i32),
+                    block_id: BlockRuntimeId(id),
+                });
             }
         }
     }
