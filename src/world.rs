@@ -7,7 +7,9 @@
 use crate::biomes::{biome_weights, terrain_height};
 use crate::blocks::*;
 use crate::caves::{is_cave, is_cave_hall, is_cheese_cave};
+use crate::geology::{SurfaceContext, slope_at, terrain_material};
 use crate::noise::*;
+use crate::spawn::find_world_spawn;
 use crate::structures::{place_house, place_tree};
 use freven_volumetric_api::{ColumnLocalCellPos, WorldGenColumnBuilder};
 use freven_world_guest_sdk::{BlockRuntimeId, WorldGenCallResult, WorldGenContext};
@@ -112,9 +114,10 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
             heights[x + DIM * z] = h;
 
             let bw = biome_weights(wx as f32, wz as f32, seed);
-            let is_mountain = bw.mountains + bw.high_mountains > 0.5;
-            let is_high = h > 55;
-            let is_very_high = h > 72;
+            let is_mountain = bw.mountains + bw.high_mountains > 0.45;
+            let slope = slope_at(wx, wz, |sx, sz| {
+                terrain_height(sx as f32, sz as f32, seed) as i32
+            });
 
             for y in 0..=h {
                 if is_cave(wx, y, wz, seed, h) {
@@ -127,17 +130,19 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
                     continue;
                 }
 
-                let id = if y + 7 < h {
-                    ids.stone
-                } else if y + 3 < h {
-                    ids.dirt
-                } else if is_very_high {
-                    ids.stone // bare high-altitude peaks
-                } else if is_mountain && is_high {
-                    ids.stone // rocky mountain slopes
-                } else {
-                    ids.grass
-                };
+                let id = terrain_material(
+                    SurfaceContext {
+                        wx,
+                        wz,
+                        y,
+                        surface_h: h,
+                        slope,
+                        is_mountain,
+                    },
+                    seed,
+                    ids,
+                );
+
                 set_world(&mut sec0, &mut sec1, &mut sec2, x as i32, y, z as i32, id);
             }
         }
@@ -146,8 +151,14 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
     let ch = hash2(cx, cz, seed);
     let center_bw = biome_weights((bx + IDIM / 2) as f32, (bz + IDIM / 2) as f32, seed);
 
-    // Houses are rare and avoided in mountain-heavy chunks.
-    let house_pos = if ch % 12 == 0 && center_bw.mountains + center_bw.high_mountains < 0.25 {
+    // Settlements should be uncommon landmarks, not frequent chunk clutter.
+    //
+    // Vintage Story / Minecraft style generation works better when structures
+    // are sparse and memorable instead of evenly distributed.
+    let house_pos = if ch % 85 == 0
+        && center_bw.mountains + center_bw.high_mountains < 0.18
+        && center_bw.plains + center_bw.forest > 0.55
+    {
         let hh = hash2(cx, cz, seed.wrapping_add(42));
         let hx = (hh % 14) as i32 + 5;
         let hz = ((hh >> 8) % 14) as i32 + 5;
@@ -162,12 +173,29 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
         None
     };
 
-    // Tree count is biome-dependent. Keep trees away from houses.
-    let tree_density = center_bw.forest * 9.0
-        + center_bw.plains * 2.0
-        + center_bw.rolling_hills * 3.0
-        + center_bw.smooth_plains * 0.5;
-    let count = (tree_density as usize).min(10);
+    // Forest ecology pass.
+    //
+    // Trees form climate-driven clusters and avoid steep/alpine terrain.
+    // This is intentionally not uniform random scatter.
+    let forest_noise = fbm(
+        (bx as f32) / 180.0,
+        (bz as f32) / 180.0,
+        seed.wrapping_add(91_337),
+        3,
+        2.0,
+        0.5,
+    ) * 0.5
+        + 0.5;
+
+    let forest_cluster = clamp01((forest_noise - 0.42) * 2.0);
+
+    let tree_density = center_bw.forest * 16.0 * forest_cluster
+        + center_bw.plains * 1.5
+        + center_bw.rolling_hills * 2.5
+        + center_bw.smooth_plains * 0.3;
+
+    let count = (tree_density as usize).min(18);
+
     for i in 0..count {
         let th = hash2(
             cx * 31 + i as i32,
@@ -182,11 +210,25 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
             let ddz = tz - hz;
             if ddx * ddx + ddz * ddz < 81 {
                 continue;
-            } // 9-block clearance around houses
+            }
         }
 
         let ground = heights[tx as usize + DIM * tz as usize];
-        if get_world(&sec0, &sec1, &sec2, tx, ground, tz) == ids.grass {
+
+        let mut max_delta = 0i32;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let nx = (tx + dx).clamp(0, IDIM - 1) as usize;
+                let nz = (tz + dz).clamp(0, IDIM - 1) as usize;
+                let nh = heights[nx + DIM * nz];
+                max_delta = max_delta.max((nh - ground).abs());
+            }
+        }
+
+        let alpine = center_bw.high_mountains > 0.22 || ground > 52;
+
+        if max_delta <= 3 && !alpine && get_world(&sec0, &sec1, &sec2, tx, ground, tz) == ids.grass
+        {
             place_tree(&mut sec0, &mut sec1, &mut sec2, ids, tx, ground + 1, tz, th);
         }
     }
@@ -240,9 +282,7 @@ pub fn generate(ctx: WorldGenContext<'_>) -> WorldGenCallResult {
     // shaping workarounds near (0, 0): the worldgen provider can suggest a
     // feet position and the host may validate or adjust it before persisting it.
     if cx == 0 && cz == 0 {
-        let spawn_x = 16usize;
-        let spawn_z = 16usize;
-        let spawn_y = heights[spawn_x + DIM * spawn_z] as f32 + 2.0;
+        let (spawn_x, spawn_z, spawn_y) = find_world_spawn(seed);
 
         out.set_initial_world_spawn_hint([spawn_x as f32 + 0.5, spawn_y, spawn_z as f32 + 0.5]);
     }

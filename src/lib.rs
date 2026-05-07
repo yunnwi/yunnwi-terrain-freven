@@ -6,7 +6,11 @@
 mod biomes;
 mod blocks;
 mod caves;
+mod climate;
+mod geology;
 mod noise;
+mod rivers;
+mod spawn;
 mod structures;
 mod world;
 

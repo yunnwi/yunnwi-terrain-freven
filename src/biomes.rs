@@ -3,7 +3,9 @@
 //! The terrain is intentionally deterministic: the same seed and world-space
 //! coordinates always produce the same biome weights and height.
 
+use crate::climate::sample_climate;
 use crate::noise::*;
+use crate::rivers::sample_river;
 
 pub struct BiomeWeights {
     pub smooth_plains: f32,
@@ -15,75 +17,56 @@ pub struct BiomeWeights {
 }
 
 pub fn biome_weights(wx: f32, wz: f32, seed: u64) -> BiomeWeights {
-    // Keep the area near the origin gentle, but do not flatten terrain height.
-    // Player placement is handled separately through the rc7 spawn hint.
-    let spawn_dist = (wx * wx + wz * wz).sqrt();
-    let spawn_blend = clamp01((spawn_dist - 80.0) / 120.0);
+    let c = sample_climate(wx, wz, seed);
 
-    // Low-frequency fields drive broad biome selection.
-    let cont = clamp01(
-        fbm(
-            wx / 700.0,
-            wz / 700.0,
-            seed.wrapping_add(33333),
-            4,
-            2.0,
-            0.5,
-        ) * 0.5
-            + 0.5,
-    );
-    let humid = clamp01(
-        fbm(
-            wx / 450.0,
-            wz / 450.0,
-            seed.wrapping_add(22222),
-            3,
-            2.0,
-            0.5,
-        ) * 0.5
-            + 0.5,
-    );
-    let erosion = clamp01(
-        fbm(
-            wx / 500.0,
-            wz / 500.0,
-            seed.wrapping_add(44444),
-            3,
-            2.0,
-            0.5,
-        ) * 0.5
-            + 0.5,
+    // V2 macro landforms.
+    //
+    // This intentionally creates stronger regional identity than the first rc8
+    // port: plains, forests, rolling hills, mountains, and high mountain belts.
+    let ridge_raw = ridged(wx / 520.0, wz / 520.0, seed.wrapping_add(20_001), 4);
+    let ridge = clamp01((ridge_raw - 0.42) * 2.4);
+
+    let uplift = clamp01(
+        (c.continentalness - 0.34) * 2.2
+            + ridge * 0.55
+            + clamp01((-c.weirdness - 0.05) * 1.6) * 0.35,
     );
 
-    // Convert the climate fields into soft biome weights. These are normalized
-    // below so height functions can be blended smoothly instead of hard-cut.
-    let high_mountains = clamp01((cont - 0.45) * 4.5) * clamp01((1.0 - erosion) * 3.0);
-    let mountains =
-        clamp01((cont - 0.28) * 3.5) * (1.0 - high_mountains) * clamp01((1.0 - erosion) * 2.5);
-    let forest = clamp01(humid * 2.5 - 0.2) * (1.0 - mountains - high_mountains);
-    let rolling_hills = clamp01((cont - 0.15) * 3.0) * (1.0 - mountains - high_mountains - forest);
-    let smooth_p =
-        clamp01((1.0 - humid) * 2.0) * (1.0 - mountains - high_mountains - forest - rolling_hills);
-    let plains = (1.0 - high_mountains - mountains - forest - rolling_hills - smooth_p).max(0.0);
+    let rugged = clamp01((0.72 - c.erosion) * 1.8 + ridge * 0.45);
+    let wet_forest = clamp01(c.humidity * 1.25 + c.forestation * 0.85 - 0.35);
 
-    let sum = high_mountains + mountains + forest + rolling_hills + smooth_p + plains + 0.0001;
-    let bw = BiomeWeights {
-        smooth_plains: smooth_p / sum,
+    let high_mountains =
+        clamp01((uplift - 0.62) * 2.8) * clamp01((rugged - 0.48) * 2.5) * (0.55 + ridge * 0.45);
+
+    let mountains = clamp01((uplift - 0.42) * 2.4)
+        * clamp01((rugged - 0.32) * 2.0)
+        * (1.0 - high_mountains * 0.55);
+
+    let rolling_hills = clamp01((uplift - 0.22) * 2.2)
+        * clamp01((rugged - 0.18) * 1.8)
+        * (1.0 - high_mountains * 0.8)
+        * (1.0 - mountains * 0.45);
+
+    let forest = wet_forest
+        * (1.0 - high_mountains * 0.55)
+        * (1.0 - mountains * 0.25)
+        * (0.75 + c.erosion * 0.25);
+
+    let smooth_plains =
+        clamp01(c.erosion * 1.15) * clamp01(1.0 - uplift * 0.75) * clamp01(1.0 - wet_forest * 0.35);
+
+    let plains =
+        clamp01(1.0 - uplift * 0.55) * clamp01(1.0 - forest * 0.25) * (0.65 + c.erosion * 0.35);
+
+    let sum = high_mountains + mountains + rolling_hills + forest + smooth_plains + plains + 0.0001;
+
+    BiomeWeights {
+        smooth_plains: smooth_plains / sum,
         rolling_hills: rolling_hills / sum,
         plains: plains / sum,
         forest: forest / sum,
         mountains: mountains / sum,
         high_mountains: high_mountains / sum,
-    };
-
-    let t = spawn_blend;
-    BiomeWeights {
-        smooth_plains: lerp(0.0, bw.smooth_plains, t),
-        rolling_hills: lerp(0.0, bw.rolling_hills, t),
-        plains: lerp(1.0, bw.plains, t),
-        forest: lerp(0.0, bw.forest, t),
-        mountains: lerp(0.0, bw.mountains, t),
-        high_mountains: lerp(0.0, bw.high_mountains, t),
     }
 }
 
@@ -134,14 +117,31 @@ pub fn terrain_height(wx: f32, wz: f32, seed: u64) -> f32 {
         42.0 + base * 6.0 + (r1 * 0.6 + r3 * 0.4) * 40.0 + r2 * 6.0 + warp * r1
     };
 
+    let macro_relief = {
+        let broad = fbm(wx / 420.0, wz / 420.0, seed.wrapping_add(900), 3, 2.0, 0.5) * 0.5 + 0.5;
+        let ridge = ridged(wx / 360.0, wz / 360.0, seed.wrapping_add(901), 4);
+        let mountain_force = bw.mountains * 0.75 + bw.high_mountains * 1.25;
+        (broad * 10.0 + ridge * 18.0) * mountain_force
+    };
+
+    let river = sample_river(wx, wz, seed);
+
+    let valley_cut = {
+        let valley_noise = 1.0 - ridged(wx / 300.0, wz / 300.0, seed.wrapping_add(902), 3);
+        let lowland_force = bw.plains * 0.35 + bw.forest * 0.25 + bw.smooth_plains * 0.45;
+        valley_noise * lowland_force * 4.0 + river.valley * 9.0 + river.river * 3.0
+    };
+
     let h = (smooth_h * bw.smooth_plains
         + rolling_h * bw.rolling_hills
         + plains_h * bw.plains
         + forest_h * bw.forest
         + mountain_h * bw.mountains
-        + high_mountain_h * bw.high_mountains)
+        + high_mountain_h * bw.high_mountains
+        + macro_relief
+        - valley_cut)
         .max(4.0)
-        .min(WORLD_H as f32 - 4.0);
+        .min(WORLD_H as f32 - 5.0);
 
     h
 }
