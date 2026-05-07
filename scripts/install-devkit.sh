@@ -12,6 +12,7 @@ cp target/wasm32-unknown-unknown/release/yunnwi_terrain_mod.wasm \
   "$INSTANCE/mods/yunnwi.terrain/yunnwi_terrain_mod.wasm"
 
 mkdir -p "$INSTANCE/experiences/yunnwi.terrain.test"
+cp examples/world_preset.toml "$INSTANCE/experiences/yunnwi.terrain.test/world_preset.toml"
 cp examples/experience.stack.toml \
   "$INSTANCE/experiences/yunnwi.terrain.test/experience.stack.toml"
 

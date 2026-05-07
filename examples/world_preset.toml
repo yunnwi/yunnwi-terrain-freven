@@ -1,0 +1,12 @@
+[world_preset]
+world_id = "yunnwi_terrain_world"
+seed = 1772908588
+primary_dimension_id = "overworld"
+
+[[world_preset.dimensions]]
+dimension_id = "overworld"
+
+[world_preset.dimensions.vertical_contract]
+min_section_y = 0
+section_count = 3
+vertical_streaming_enabled = true
